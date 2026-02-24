@@ -22,6 +22,62 @@ import fs from 'fs';
 import { Response } from 'express';
 const sseClients: Response[] = [];
 
+type IdempotencyOutcome = {
+  status: number;
+  body: any;
+  createdAt: number;
+  bodyFingerprint: string;
+};
+
+type InflightIdempotency = {
+  bodyFingerprint: string;
+  promise: Promise<IdempotencyOutcome>;
+  createdAt: number;
+};
+
+const IDEMPOTENCY_TTL_MS = 10 * 60 * 1000;
+const productCreateIdempotencyCache = new Map<string, IdempotencyOutcome>();
+const productCreateIdempotencyInflight = new Map<string, InflightIdempotency>();
+
+function getBodyFingerprint(body: unknown): string {
+  return JSON.stringify(body ?? {});
+}
+
+function cleanupIdempotencyMaps(now = Date.now()) {
+  for (const [key, value] of productCreateIdempotencyCache.entries()) {
+    if (now - value.createdAt > IDEMPOTENCY_TTL_MS) {
+      productCreateIdempotencyCache.delete(key);
+    }
+  }
+  for (const [key, value] of productCreateIdempotencyInflight.entries()) {
+    if (now - value.createdAt > IDEMPOTENCY_TTL_MS) {
+      productCreateIdempotencyInflight.delete(key);
+    }
+  }
+}
+
+function mapCreateProductError(err: unknown, payload: unknown) {
+  logEvent('Erro ao criar produto', 'error', {
+    message: (err as any)?.message || String(err),
+    stack: (err as any)?.stack,
+    payload
+  });
+  if (typeof err === 'object' && err !== null && 'code' in err && 'message' in err) {
+    const code = (err as { code: string; message: string }).code;
+    const message = (err as { code: string; message: string }).message;
+    if (code === 'VALIDATION_ERROR') {
+      return { status: 400, body: { error: { code, message } } };
+    }
+    if (code === 'DUPLICATE_EAN') {
+      return { status: 409, body: { error: { code, message } } };
+    }
+    if (code === 'DUPLICATE_INTERNAL_CODE') {
+      return { status: 409, body: { error: { code, message } } };
+    }
+  }
+  return { status: 500, body: { error: { code: 'INTERNAL_ERROR', message: 'Erro ao criar produto.' } } };
+}
+
 
 // Log de todas as requisições recebidas neste router
 productRouter.use((req, res, next) => {
@@ -154,39 +210,63 @@ productRouter.get('/search', (req, res) => {
   }
 });
 
-productRouter.post('/', (req, res) => {
-  try {
-    console.log('[POST /api/products] Recebido:', req.body);
-    const product = createProduct({
-      ...req.body,
-      type: req.body.type || 'product',
-    });
-    console.log('[POST /api/products] Produto criado com sucesso:', product);
-    logEvent('Produto criado', 'info', { productId: product.id, name: product.name, ean: product.ean, internalCode: product.internal_code });
-    emitProductEvent('created', product);
-    res.status(201).json({ product });
-  } catch (err) {
-    logEvent('Erro ao criar produto', 'error', {
-      message: (err as any)?.message || String(err),
-      stack: (err as any)?.stack,
-      payload: req.body
-    });
-    if (typeof err === 'object' && err !== null && 'code' in err && 'message' in err) {
-      const code = (err as { code: string; message: string }).code;
-      const message = (err as { code: string; message: string }).message;
-      if (code === 'VALIDATION_ERROR') {
-        res.status(400).json({ error: { code, message } });
-      } else if (code === 'DUPLICATE_EAN') {
-        res.status(409).json({ error: { code, message } });
-      } else if (code === 'DUPLICATE_INTERNAL_CODE') {
-        res.status(409).json({ error: { code, message } });
-      } else {
-        res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Erro ao criar produto.' } });
-      }
-    } else {
-      res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Erro ao criar produto.' } });
+productRouter.post('/', async (req, res) => {
+  const idempotencyKey = req.get('Idempotency-Key')?.trim() || '';
+  const bodyFingerprint = getBodyFingerprint(req.body);
+  cleanupIdempotencyMaps();
+
+  const createAction = async (): Promise<IdempotencyOutcome> => {
+    try {
+      console.log('[POST /api/products] Recebido:', req.body);
+      const product = createProduct({
+        ...req.body,
+        type: req.body.type || 'product',
+      });
+      console.log('[POST /api/products] Produto criado com sucesso:', product);
+      logEvent('Produto criado', 'info', { productId: product.id, name: product.name, ean: product.ean, internalCode: product.internal_code });
+      emitProductEvent('created', product);
+      return { status: 201, body: { product }, createdAt: Date.now(), bodyFingerprint };
+    } catch (err) {
+      const mapped = mapCreateProductError(err, req.body);
+      return { status: mapped.status, body: mapped.body, createdAt: Date.now(), bodyFingerprint };
     }
+  };
+
+  if (!idempotencyKey) {
+    const outcome = await createAction();
+    return res.status(outcome.status).json(outcome.body);
   }
+
+  const cached = productCreateIdempotencyCache.get(idempotencyKey);
+  if (cached) {
+    if (cached.bodyFingerprint !== bodyFingerprint) {
+      return res.status(409).json({ error: { code: 'IDEMPOTENCY_KEY_REUSED', message: 'A mesma Idempotency-Key foi reutilizada com payload diferente.' } });
+    }
+    res.setHeader('Idempotency-Replayed', 'true');
+    return res.status(cached.status).json(cached.body);
+  }
+
+  const inflight = productCreateIdempotencyInflight.get(idempotencyKey);
+  if (inflight) {
+    if (inflight.bodyFingerprint !== bodyFingerprint) {
+      return res.status(409).json({ error: { code: 'IDEMPOTENCY_KEY_REUSED', message: 'A mesma Idempotency-Key foi reutilizada com payload diferente.' } });
+    }
+    const outcome = await inflight.promise;
+    res.setHeader('Idempotency-Replayed', 'true');
+    return res.status(outcome.status).json(outcome.body);
+  }
+
+  const pending = createAction();
+  productCreateIdempotencyInflight.set(idempotencyKey, {
+    bodyFingerprint,
+    promise: pending,
+    createdAt: Date.now(),
+  });
+
+  const outcome = await pending;
+  productCreateIdempotencyInflight.delete(idempotencyKey);
+  productCreateIdempotencyCache.set(idempotencyKey, outcome);
+  return res.status(outcome.status).json(outcome.body);
 });
 
 productRouter.put('/:id', (req, res) => {

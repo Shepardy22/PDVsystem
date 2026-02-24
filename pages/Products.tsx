@@ -29,6 +29,67 @@ import { useAuth } from '../components/AuthContext';
 import { isOperator } from '../types';
 import { logUiEvent } from '../services/telemetry';
 
+const ALLOWED_UNITS = ['cx', 'unit', 'kg', 'serv'] as const;
+
+type ProductFormPayload = {
+   name: string;
+   unit: 'cx' | 'unit' | 'kg' | 'serv';
+   status: 'active' | 'inactive';
+   costPrice: number;
+   salePrice: number;
+   stockOnHand: number;
+   minStock: number;
+   autoDiscountEnabled: boolean;
+   autoDiscountValue: number;
+   imageUrl: string;
+   categoryId: string | null;
+   supplierId: string | null;
+   type: 'product' | 'service';
+   ean: string | null;
+   internalCode: string | null;
+};
+
+const mapApiProductToUi = (product: any): Product => ({
+   id: product.id,
+   name: product.name,
+   gtin: product.ean || product.gtin,
+   internalCode: product.internal_code || product.internalCode,
+   unit: product.unit,
+   costPrice: typeof product.cost_price === 'number' ? product.cost_price / 100 : product.costPrice,
+   salePrice: typeof product.sale_price === 'number' ? product.sale_price / 100 : product.salePrice,
+   stock: product.stock_on_hand ?? product.stock ?? 0,
+   minStock: product.min_stock ?? 20,
+   category: product.category_id || product.category,
+   supplier: product.supplier_id || product.supplier || '',
+   status: product.status,
+   imageUrl: product.imageUrl || '',
+   autoDiscount: typeof product.auto_discount_value === 'number' ? product.auto_discount_value / 100 : product.autoDiscount,
+   type: product.type || 'product',
+} as Product);
+
+const validateProductPayload = (payload: ProductFormPayload): string | null => {
+   if (!payload.name.trim()) return 'Informe o nome do produto/serviço.';
+   if (!ALLOWED_UNITS.includes(payload.unit)) return 'Unidade inválida.';
+   if (payload.salePrice < 0 || payload.costPrice < 0) return 'Preços não podem ser negativos.';
+   if (payload.stockOnHand < 0 || payload.minStock < 0) return 'Estoque e estoque mínimo não podem ser negativos.';
+   if (payload.autoDiscountValue < 0) return 'O desconto automático não pode ser negativo.';
+   if (payload.type === 'product') {
+      if (!payload.ean || payload.ean.trim().length !== 13) return 'EAN obrigatório com 13 dígitos.';
+      if (!payload.internalCode || payload.internalCode.trim().length < 1) return 'Código interno é obrigatório.';
+   }
+   return null;
+};
+
+const upsertProductInList = (items: Product[], incoming: Product): Product[] => {
+   const index = items.findIndex(item => item.id === incoming.id);
+   if (index === -1) return [...items, incoming];
+   const next = [...items];
+   next[index] = { ...next[index], ...incoming };
+   return next;
+};
+
+const PRODUCTS_FETCH_LIMIT = 5000;
+
 const Products: React.FC = () => {
    // Estado para imagem selecionada antes da criação
    const [imageFile, setImageFile] = useState<File | null>(null);
@@ -51,9 +112,10 @@ const Products: React.FC = () => {
    // Estados de Filtro
    const [selectedCategory, setSelectedCategory] = useState<string>('all');
    const [stockStatus, setStockStatus] = useState<'all' | 'low' | 'normal'>('all');
-   const [showCategoryList, setShowCategoryList] = useState(false);
-   const [showStockList, setShowStockList] = useState(false);
-   type SortKey = 'name' | 'costPrice' | 'salePrice' | 'stock';
+    const [showCategoryList, setShowCategoryList] = useState(false);
+    const [showStockList, setShowStockList] = useState(false);
+    const [isSavingProduct, setIsSavingProduct] = useState(false);
+    type SortKey = 'name' | 'costPrice' | 'salePrice' | 'stock';
    const [sortConfig, setSortConfig] = useState<{ key: SortKey; direction: 'asc' | 'desc' }>({ key: 'name', direction: 'asc' });
 
    // SSE: Atualização em tempo real dos produtos
@@ -62,27 +124,15 @@ const Products: React.FC = () => {
       evtSource.addEventListener('created', (e: any) => {
          try {
             const product = JSON.parse(e.data);
-            setProducts(prev => {
-               // Evita duplicidade
-               if (prev.some(p => p.id === product.id)) return prev;
-               return [...prev, product];
-            });
+            const mapped = mapApiProductToUi(product);
+            setProducts(prev => upsertProductInList(prev, mapped));
          } catch { }
       });
       evtSource.addEventListener('updated', (e: any) => {
          try {
             const product = JSON.parse(e.data);
-            // Garante conversão de centavos para reais ao atualizar produto após upload de imagem
-            setProducts(prev => prev.map(p =>
-               p.id === product.id
-                  ? {
-                      ...p,
-                      ...product,
-                      costPrice: typeof product.cost_price === 'number' ? product.cost_price / 100 : (typeof product.costPrice === 'number' ? product.costPrice : 0),
-                      salePrice: typeof product.sale_price === 'number' ? product.sale_price / 100 : (typeof product.salePrice === 'number' ? product.salePrice : 0),
-                    }
-                  : p
-            ));
+            const mapped = mapApiProductToUi(product);
+            setProducts(prev => upsertProductInList(prev, mapped));
          } catch { }
       });
       evtSource.addEventListener('deleted', (e: any) => {
@@ -205,28 +255,13 @@ const Products: React.FC = () => {
          .catch(() => setSuppliers([]))
          .finally(() => setIsSupplierLoading(false));
       // Buscar todos os produtos uma vez
-      fetch('/api/products')
+      fetch(`/api/products?limit=${PRODUCTS_FETCH_LIMIT}`)
          .then(res => {
             if (!res.ok) throw new Error('Erro ao buscar produtos');
             return res.json();
          })
          .then(data => {
-            const items = (data.items || data.products || []).map((product: any) => ({
-               id: product.id,
-               name: product.name,
-               gtin: product.ean || product.gtin,
-               internalCode: product.internal_code || product.internalCode,
-               unit: product.unit,
-               costPrice: typeof product.cost_price === 'number' ? product.cost_price / 100 : product.costPrice,
-               salePrice: typeof product.sale_price === 'number' ? product.sale_price / 100 : product.salePrice,
-               stock: product.stock_on_hand ?? product.stock ?? 0,
-               minStock: product.min_stock ?? 20,
-               category: product.category_id || product.category,
-               supplier: product.supplier_id || product.supplier || '',
-               status: product.status,
-               imageUrl: product.imageUrl || '',
-               autoDiscount: typeof product.auto_discount_value === 'number' ? product.auto_discount_value / 100 : product.autoDiscount,
-            }));
+            const items = (data.items || data.products || []).map((product: any) => mapApiProductToUi(product));
             setProducts(items);
             setError(null);
          })
@@ -302,13 +337,14 @@ const Products: React.FC = () => {
 
    async function handleProductSubmit(e: React.FormEvent<HTMLFormElement>) {
       e.preventDefault();
+      if (isSavingProduct) return;
       const form = e.currentTarget;
       const formData = new FormData(form);
       const type = formData.get('type') as string || 'product';
       const isService = type === 'service';
-      const payload: any = {
-         name: formData.get('name'),
-         unit: isService ? 'serv' : (formData.get('unit') || 'unit'),
+      const payload: ProductFormPayload = {
+         name: String(formData.get('name') || '').trim(),
+         unit: isService ? 'serv' : (String(formData.get('unit') || 'unit') as ProductFormPayload['unit']),
          status: autoActive ? 'active' : 'inactive',
          costPrice: Number(formData.get('costPrice')) || 0,
          salePrice: Number(formData.get('salePrice')) || 0,
@@ -317,13 +353,15 @@ const Products: React.FC = () => {
          autoDiscountEnabled: formData.get('autoDiscountEnabled') === 'on' ? true : false,
          autoDiscountValue: Number(formData.get('autoDiscountValue')) || 0,
          imageUrl: selectedProduct?.imageUrl || formData.get('imageUrl') || '',
-         categoryId: formData.get('categoryId') || null,
-         supplierId: isService ? null : (formData.get('supplier') || null),
-         type,
+         categoryId: String(formData.get('categoryId') || '') || null,
+         supplierId: isService ? null : (String(formData.get('supplier') || '') || null),
+         type: type === 'service' ? 'service' : 'product',
+         ean: null,
+         internalCode: null,
       };
       if (!isService) {
-         payload.ean = eanValue || formData.get('gtin');
-         payload.internalCode = internalCodeValue || formData.get('internalCode');
+         payload.ean = String(eanValue || formData.get('gtin') || '').trim();
+         payload.internalCode = String(internalCodeValue || formData.get('internalCode') || '').trim();
          // Validação frontend antes de enviar
          if (!payload.ean || !payload.internalCode) {
             showPopup('error', 'Campos obrigatórios', 'Para produtos, o EAN e Código Interno são obrigatórios.');
@@ -333,10 +371,19 @@ const Products: React.FC = () => {
          payload.ean = null;
          payload.internalCode = null;
       }
+      const validationError = validateProductPayload(payload);
+      if (validationError) {
+         showPopup('error', 'Validação de cadastro', validationError);
+         return;
+      }
+      setIsSavingProduct(true);
       try {
          sendTelemetry('product', 'submit-start', { mode: selectedProduct ? 'update' : 'create', type, status: payload.status });
          let res;
          let product;
+         const createIdempotencyKey = !selectedProduct
+            ? (`prd-create-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+            : null;
          if (selectedProduct) {
             res = await fetch(`/api/products/${selectedProduct.id}`, {
                method: 'PUT',
@@ -346,7 +393,10 @@ const Products: React.FC = () => {
          } else {
             res = await fetch('/api/products', {
                method: 'POST',
-               headers: { 'Content-Type': 'application/json' },
+               headers: {
+                  'Content-Type': 'application/json',
+                  'Idempotency-Key': createIdempotencyKey || '',
+               },
                body: JSON.stringify(payload)
             });
          }
@@ -411,55 +461,17 @@ const Products: React.FC = () => {
             }
          }
 
-         const mappedProduct = {
-            id: product.id,
-            name: product.name,
-            gtin: product.ean || product.gtin,
-            internalCode: product.internal_code || product.internalCode,
-            unit: product.unit,
-            costPrice: typeof product.cost_price === 'number' ? product.cost_price / 100 : product.costPrice,
-            salePrice: typeof product.sale_price === 'number' ? product.sale_price / 100 : product.salePrice,
-            stock: product.stock_on_hand ?? product.stock ?? 0,
-            minStock: product.min_stock ?? 20,
-            category: product.category_id || product.category,
-            supplier: product.supplier_id || product.supplier || '',
-            status: product.status,
-            imageUrl: product.imageUrl || '',
-            autoDiscount: typeof product.auto_discount_value === 'number' ? product.auto_discount_value / 100 : product.autoDiscount,
-            type: product.type || 'product',
-         };
-         setProducts(prev => {
-            if (selectedProduct) {
-               return prev.map(p => p.id === mappedProduct.id ? mappedProduct : p);
-            } else {
-               return [...prev, mappedProduct];
-            }
-         });
+         const mappedProduct = mapApiProductToUi(product);
+         setProducts(prev => upsertProductInList(prev, mappedProduct));
          setIsCreateModalOpen(false);
          setSelectedProduct(null);
          setImageFile(null);
          // Buscar produtos atualizados para garantir sincronia
          setLoading(true);
-         fetch('/api/products')
+         fetch(`/api/products?limit=${PRODUCTS_FETCH_LIMIT}`)
             .then(res => res.json())
             .then(data => {
-               const items = (data.items || data.products || []).map((product: any) => ({
-                  id: product.id,
-                  name: product.name,
-                  gtin: product.ean || product.gtin,
-                  internalCode: product.internal_code || product.internalCode,
-                  unit: product.unit,
-                  costPrice: typeof product.cost_price === 'number' ? product.cost_price / 100 : product.costPrice,
-                  salePrice: typeof product.sale_price === 'number' ? product.sale_price / 100 : product.salePrice,
-                  stock: product.stock_on_hand ?? product.stock ?? 0,
-                  minStock: product.min_stock ?? 20,
-                  category: product.category_id || product.category,
-                  supplier: product.supplier_id || product.supplier || '',
-                  status: product.status,
-                  imageUrl: product.imageUrl || '',
-                  autoDiscount: typeof product.auto_discount_value === 'number' ? product.auto_discount_value / 100 : product.autoDiscount,
-                  type: product.type || 'product',
-               }));
+               const items = (data.items || data.products || []).map((product: any) => mapApiProductToUi(product));
                setProducts(items);
                setError(null);
             })
@@ -484,6 +496,8 @@ const Products: React.FC = () => {
          }
          showPopup('error', 'Erro ao salvar produto/serviço', msg);
          sendTelemetry('product', 'submit-error', { mode: selectedProduct ? 'update' : 'create', message: err instanceof Error ? err.message : 'unknown' });
+      } finally {
+         setIsSavingProduct(false);
       }
    }
 
@@ -1485,9 +1499,9 @@ const Products: React.FC = () => {
                         type="submit"
                         className="flex-1 py-4 text-xs font-bold uppercase tracking-widest shadow-accent-glow"
                         icon={<Check size={18} />}
-                        disabled={isOperatorUser}
+                        disabled={isOperatorUser || isSavingProduct}
                      >
-                        Confirmar {selectedProduct ? 'Atualização' : 'Adição'}
+                        {isSavingProduct ? 'Salvando...' : `Confirmar ${selectedProduct ? 'Atualização' : 'Adição'}`}
                      </Button>
 
                   </div>
@@ -1729,25 +1743,10 @@ const Products: React.FC = () => {
                               setIsPreviewModalOpen(false);
                               // Atualiza lista de produtos
                               setLoading(true);
-                              fetch('/api/products')
+                              fetch(`/api/products?limit=${PRODUCTS_FETCH_LIMIT}`)
                                  .then(res => res.json())
                                  .then(data => {
-                                    const items = (data.items || data.products || []).map((product: any) => ({
-                                       id: product.id,
-                                       name: product.name,
-                                       gtin: product.ean || product.gtin,
-                                       internalCode: product.internal_code || product.internalCode,
-                                       unit: product.unit,
-                                       costPrice: typeof product.cost_price === 'number' ? product.cost_price / 100 : product.costPrice,
-                                       salePrice: typeof product.sale_price === 'number' ? product.sale_price / 100 : product.salePrice,
-                                       stock: product.stock_on_hand ?? product.stock ?? 0,
-                                       minStock: product.min_stock ?? 20,
-                                       category: product.category_id || product.category,
-                                       supplier: product.supplier_id || product.supplier || '',
-                                       status: product.status,
-                                       imageUrl: product.imageUrl || '',
-                                       autoDiscount: typeof product.auto_discount_value === 'number' ? product.auto_discount_value / 100 : product.autoDiscount,
-                                    }));
+                                    const items = (data.items || data.products || []).map((product: any) => mapApiProductToUi(product));
                                     setProducts(items);
                                     setError(null);
                                  })

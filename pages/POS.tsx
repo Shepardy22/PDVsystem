@@ -28,6 +28,34 @@ interface POSProps {
 
 }
 
+const POS_PRODUCTS_FETCH_LIMIT = 5000;
+
+const mapApiProductToUi = (product: any): Product => ({
+   id: product.id,
+   name: product.name,
+   gtin: product.ean || product.gtin,
+   internalCode: product.internal_code || product.internalCode,
+   unit: product.unit,
+   costPrice: typeof product.cost_price === 'number' ? product.cost_price / 100 : product.costPrice,
+   salePrice: typeof product.sale_price === 'number' ? product.sale_price / 100 : product.salePrice,
+   stock: product.stock_on_hand ?? product.stock ?? 0,
+   minStock: product.min_stock ?? 20,
+   category: product.category_id || product.category,
+   supplier: product.supplier_id || product.supplier || '',
+   status: product.status,
+   imageUrl: product.imageUrl || '',
+   autoDiscount: typeof product.auto_discount_value === 'number' ? product.auto_discount_value / 100 : product.autoDiscount,
+   type: product.type || 'product',
+} as Product);
+
+const upsertProductInList = (items: Product[], incoming: Product): Product[] => {
+   const index = items.findIndex(item => item.id === incoming.id);
+   if (index === -1) return [...items, incoming];
+   const next = [...items];
+   next[index] = { ...next[index], ...incoming };
+   return next;
+};
+
 
 const POS: React.FC<POSProps> = ({ cashOpen, onOpenCash }) => {
    const CART_STORAGE_KEY = 'pdv-pos-cart-v1';
@@ -812,29 +840,13 @@ const POS: React.FC<POSProps> = ({ cashOpen, onOpenCash }) => {
    // Carrega todos os produtos ao iniciar
    useEffect(() => {
       setSearchLoading(true);
-      fetch('/api/products')
+      fetch(`/api/products?limit=${POS_PRODUCTS_FETCH_LIMIT}`)
          .then(res => {
             if (!res.ok) throw new Error('Erro ao buscar produtos');
             return res.json();
          })
          .then(data => {
-            const items = (data.items || data.products || []).map((product: any) => ({
-               id: product.id,
-               name: product.name,
-               gtin: product.ean || product.gtin,
-               internalCode: product.internal_code || product.internalCode,
-               unit: product.unit,
-               costPrice: typeof product.cost_price === 'number' ? product.cost_price / 100 : product.costPrice,
-               salePrice: typeof product.sale_price === 'number' ? product.sale_price / 100 : product.salePrice,
-               stock: product.stock_on_hand ?? product.stock ?? 0,
-               minStock: product.min_stock ?? 20,
-               category: product.category_id || product.category,
-               supplier: product.supplier_id || product.supplier || '',
-               status: product.status,
-               imageUrl: product.imageUrl || '',
-               autoDiscount: typeof product.auto_discount_value === 'number' ? product.auto_discount_value / 100 : product.autoDiscount,
-               type: product.type || 'product',
-            }));
+            const items = (data.items || data.products || []).map((product: any) => mapApiProductToUi(product));
             setProducts(items);
             setSearchError(null);
          })
@@ -851,16 +863,15 @@ const POS: React.FC<POSProps> = ({ cashOpen, onOpenCash }) => {
       evtSource.addEventListener('created', (e: any) => {
          try {
             const product = JSON.parse(e.data);
-            setProducts(prev => {
-               if (prev.some(p => p.id === product.id)) return prev;
-               return [...prev, product];
-            });
+            const mapped = mapApiProductToUi(product);
+            setProducts(prev => upsertProductInList(prev, mapped));
          } catch { }
       });
       evtSource.addEventListener('updated', (e: any) => {
          try {
             const product = JSON.parse(e.data);
-            setProducts(prev => prev.map(p => p.id === product.id ? product : p));
+            const mapped = mapApiProductToUi(product);
+            setProducts(prev => upsertProductInList(prev, mapped));
          } catch { }
       });
       evtSource.addEventListener('deleted', (e: any) => {
