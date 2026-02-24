@@ -162,6 +162,10 @@ clientRouter.post('/', async (req, res) => {
     logEvent('Cliente criado', 'info', { clientId: client.id, name: client.name, cpf: client.cpf });
     res.status(201).json(client);
   } catch (e: any) {
+    if (e?.code === 'CPF_DUPLICATE') {
+      logEvent('Erro ao criar cliente', 'warn', { payload: req.body, message: e?.message || 'CPF_DUPLICATE' });
+      return res.status(400).json({ error: e?.message || 'Já existe um cliente com este CPF.' });
+    }
     logEvent('Erro ao criar cliente', 'error', { message: e?.message || String(e), stack: e?.stack, payload: req.body });
     res.status(500).json({ error: 'Erro ao criar cliente', details: e && e.message ? e.message : e });
   }
@@ -182,6 +186,10 @@ clientRouter.put('/:id', async (req, res) => {
       res.status(404).json({ error: 'Cliente não encontrado' });
     }
   } catch (e: any) {
+    if (e?.code === 'CPF_DUPLICATE') {
+      logEvent('Erro ao atualizar cliente', 'warn', { clientId: req.params?.id, message: e?.message || 'CPF_DUPLICATE' });
+      return res.status(400).json({ error: e?.message || 'Já existe um cliente com este CPF.' });
+    }
     logEvent('Erro ao atualizar cliente', 'error', { clientId: req.params?.id, message: e?.message || String(e), stack: e?.stack, payload: req.body });
     res.status(500).json({ error: 'Erro ao atualizar cliente', details: e && e.message ? e.message : e });
   }

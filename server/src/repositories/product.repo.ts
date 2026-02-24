@@ -184,3 +184,11 @@ export function updateProduct(id: string, data: any) {
   `).run({ ...updated, id });
   return updated;
 }
+
+export function updateProductImage(id: string, imageUrl: string) {
+  const existing = getProductById(id) as Product | undefined;
+  if (!existing) throw { code: 'NOT_FOUND', message: 'Produto não encontrado.' };
+  const now = Date.now();
+  db.prepare('UPDATE products SET imageUrl = ?, updated_at = ? WHERE id = ?').run(imageUrl, now, id);
+  return { ...existing, imageUrl, updated_at: now };
+}

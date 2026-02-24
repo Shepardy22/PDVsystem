@@ -7,6 +7,7 @@ import {
   searchProducts,
   createProduct,
   updateProduct,
+  updateProductImage,
   getProductById,
   deleteProduct,
   deleteAllProducts
@@ -118,7 +119,7 @@ productRouter.post('/delete-image', async (req, res) => {
       fs.unlinkSync(filePath);
     }
     // Limpa campo imageUrl no banco
-    updateProduct(productId, { imageUrl: '' });
+    updateProductImage(productId, '');
     logEvent('Imagem de produto removida', 'info', { productId, imageUrl });
     res.json({ success: true });
   } catch (err) {
@@ -165,21 +166,6 @@ productRouter.delete('/', (_req, res) => {
   }
 });
 
-// Buscar produto por ID (deve ficar após a declaração de productRouter)
-productRouter.get('/:id', (req, res) => {
-  const { id } = req.params;
-  try {
-    const product = getProductById(id);
-    if (!product) {
-      return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Produto não encontrado.' } });
-    }
-    logEvent('Produto consultado', 'info', { productId: id });
-    res.json(product);
-  } catch (err) {
-    res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Erro ao buscar produto.' } });
-  }
-});
-
 productRouter.get('/', (req, res) => {
   const limit = parseInt(req.query.limit as string) || 50;
   const offset = parseInt(req.query.offset as string) || 0;
@@ -207,6 +193,21 @@ productRouter.get('/search', (req, res) => {
       query: q
     });
     res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Erro na busca.' } });
+  }
+});
+
+// Buscar produto por ID
+productRouter.get('/:id', (req, res) => {
+  const { id } = req.params;
+  try {
+    const product = getProductById(id);
+    if (!product) {
+      return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Produto n�o encontrado.' } });
+    }
+    logEvent('Produto consultado', 'info', { productId: id });
+    res.json(product);
+  } catch (err) {
+    res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Erro ao buscar produto.' } });
   }
 });
 
@@ -317,3 +318,4 @@ productRouter.delete('/:id', (req, res) => {
     }
   }
 });
+

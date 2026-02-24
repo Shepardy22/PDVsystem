@@ -34,7 +34,7 @@ const OperatorSalesBreakdown: React.FC<OperatorSalesBreakdownProps> = ({ sales, 
   const [operatorNames, setOperatorNames] = useState<Record<string, string>>({});
   
   // Configuração de comissão
-  const [commissionEnabled, setCommissionEnabled] = useState(true);
+  const [commissionEnabled, setCommissionEnabled] = useState(false);
   const [commissionRate, setCommissionRate] = useState(2); // Porcentagem padrão
   const [showSettings, setShowSettings] = useState(false);
   
@@ -44,7 +44,7 @@ const OperatorSalesBreakdown: React.FC<OperatorSalesBreakdownProps> = ({ sales, 
       const stored = localStorage.getItem(COMMISSION_STORAGE_KEY);
       if (stored) {
         const config = JSON.parse(stored);
-        setCommissionEnabled(config.enabled ?? true);
+        setCommissionEnabled(config.enabled ?? false);
         setCommissionRate(config.rate ?? 2);
       }
     } catch (err) {

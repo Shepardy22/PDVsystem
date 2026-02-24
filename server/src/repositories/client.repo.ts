@@ -38,8 +38,17 @@ export async function createClient({ name, cpf, address, phone, email }: any) {
 export async function updateClient(id: string, { name, cpf, address, phone, email }: any) {
   const now = Date.now();
   const stmt = db.prepare('UPDATE clients SET name = ?, cpf = ?, address = ?, phone = ?, email = ?, updated_at = ? WHERE id = ?');
-  const info = stmt.run(name, cpf, address, phone, email, now, id);
-  return info.changes > 0;
+  try {
+    const info = stmt.run(name, cpf, address, phone, email, now, id);
+    return info.changes > 0;
+  } catch (e: any) {
+    if (e && typeof e.message === 'string' && e.message.includes('UNIQUE constraint failed: clients.cpf')) {
+      const err: any = new Error('Já existe um cliente com este CPF.');
+      err.code = 'CPF_DUPLICATE';
+      throw err;
+    }
+    throw e;
+  }
 }
 
 export async function deleteClient(id: string) {
