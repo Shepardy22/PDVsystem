@@ -139,7 +139,7 @@ const Reports: React.FC = () => {
          <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-3">
            <Layers className="text-accent" /> Inteligência de Dados
          </h1>
-         <p className="text-slate-500 text-sm font-medium uppercase tracking-widest text-[10px]">// {import.meta.env.VITE_APP_NAME || 'Nome Empresa'} Analytics</p>
+         <p className="text-slate-500 text-sm font-medium uppercase tracking-widest text-[10px]">// {import.meta.env.VITE_APP_NAME || 'Chaveiro Mega Chave'} Analytics</p>
         </div>
       <div>
         {/* Indicador discreto de inteligência de dados */}

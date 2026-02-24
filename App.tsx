@@ -294,10 +294,10 @@ const App: React.FC = () => {
               }`}
             >
               <span className="text-lg font-bold tracking-tight text-white leading-tight">
-                {import.meta.env.VITE_APP_NAME?.split(' ')[0] || 'Loja Nome'}
+                {(import.meta.env.VITE_APP_NAME || 'Chaveiro Mega Chave').split(' ')[0]}
               </span>
               <span className="text-xl font-bold tracking-tight text-accent opacity-80 leading-tight">
-                {import.meta.env.VITE_APP_NAME?.split(' ').slice(1).join(' ') || 'System'}
+                {(import.meta.env.VITE_APP_NAME || 'Chaveiro Mega Chave').split(' ').slice(1).join(' ')}
               </span>
             </div>
           )}

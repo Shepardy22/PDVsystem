@@ -1321,7 +1321,7 @@ const CashManagement: React.FC = () => {
                                      onClick={async () => {
                                         // Monta objeto company (usa dados do .env via pdfUtils)
                                         const company = {
-                                           name: import.meta.env.VITE_APP_NAME || 'Nome Empresa',
+                                           name: import.meta.env.VITE_APP_NAME,
                                            cnpj: import.meta.env.VITE_APP_CNPJ || '',
                                            address: import.meta.env.VITE_APP_ADDRESS || '',
                                            phone: import.meta.env.VITE_APP_PHONE || ''
@@ -1488,7 +1488,7 @@ const CashManagement: React.FC = () => {
                                      icon={<Printer size={18} />}
                                      onClick={async () => {
                                         const company = {
-                                           name: import.meta.env.VITE_APP_NAME || 'Nome Empresa',
+                                           name: import.meta.env.VITE_APP_NAME ,
                                            cnpj: import.meta.env.VITE_APP_CNPJ || '',
                                            address: import.meta.env.VITE_APP_ADDRESS || '',
                                            phone: import.meta.env.VITE_APP_PHONE || ''
@@ -1530,7 +1530,7 @@ const CashManagement: React.FC = () => {
                      <>
                         {console.log('selectedTx:', selectedTx)}
                         <div className="text-center mb-4">
-                           <h2 className="text-lg font-bold tracking-tighter">{import.meta.env.VITE_APP_NAME || 'Nome Empresa'}</h2>
+                           <h2 className="text-lg font-bold tracking-tighter">{import.meta.env.VITE_APP_NAME || 'Chaveiro Mega Chave'}</h2>
                            <p className="text-[10px]">OBRIGADO PELA PREFERÊNCIA</p>
                            <div className="border-b border-black border-dashed my-2"></div>
                            <p className="text-[10px] font-bold uppercase">{selectedTx.type === 'sale' ? 'CUPOM FISCAL VIRTUAL' : 'VALE DE CAIXA'}</p>
