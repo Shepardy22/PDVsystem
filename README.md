@@ -218,6 +218,10 @@ Get-ChildItem dist -Recurse | Measure-Object -Property Length -Sum | Select-Obje
 
 # Listar todos os chunks ordenados por tamanho
 Get-ChildItem dist/assets/*.js | Sort-Object Length -Descending | Select-Object Name, @{Name="Size(KB)";Expression={[math]::Round($_.Length / 1KB, 2)}}
+
+
+# Aplicar correção de chaves estrangeiras no SQLite
+Get-Content server/migrations/fix_products_foreign_keys_cascade.sql | sqlite3 data/novabev.sqlite
 ```
 
 > **💡 Dica**: Use os scripts npm (`build:analyze`, `build:errors`, etc.) para análises comuns. Reserve comandos PowerShell customizados para casos específicos.
