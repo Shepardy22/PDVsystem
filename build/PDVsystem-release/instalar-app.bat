@@ -35,22 +35,9 @@ if %errorlevel% neq 0 (
   pause
   exit /b 1
 )
-
 call powershell -Command "Write-Host 'Dependencias instaladas com sucesso.' -ForegroundColor Green"
 
-echo [4/5] Aplicando migrations do banco de dados...
-call npm run migrate >migrate.log 2>&1
-if %errorlevel% neq 0 (
-  call powershell -Command "Write-Host 'Falha ao aplicar migrations. Veja migrate.log para detalhes.' -ForegroundColor Red"
-  pause
-  exit /b 1
-)
-call powershell -Command "Write-Host 'Migrations aplicadas com sucesso.' -ForegroundColor Green"
-
-REM Ajusta numeração dos passos seguintes
-echo [5/6] Iniciando backend em modo producao (PM2)...
-
-REM ...existing code...
+echo [4/5] Iniciando backend em modo producao (PM2)...
 call pm2 delete PDVsystem >nul 2>&1
 call pm2 start server/dist/index.js --name PDVsystem --env production --node-args="--env-file=.env" >start.log 2>&1
 if %errorlevel% neq 0 (
@@ -61,7 +48,7 @@ if %errorlevel% neq 0 (
 call pm2 save >nul 2>&1
 call powershell -Command "Write-Host 'Backend iniciado com sucesso via PM2.' -ForegroundColor Green"
 
-echo [6/6] Criando atalho do app (modo Chrome app)...
+echo [5/5] Criando atalho do app (modo Chrome app)...
 set SHORTCUT_NAME=PDVsystem.lnk
 set APP_URL=http://localhost:8787
 set CHROME_PATH=%ProgramFiles%\Google\Chrome\Application\chrome.exe
