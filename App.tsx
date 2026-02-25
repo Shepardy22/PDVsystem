@@ -17,7 +17,7 @@ const Settings = lazy(() => import('./pages/Settings'));
 // Declaração global para suportar import.meta.env no Vite/TypeScript
 declare global {
   interface ImportMetaEnv {
-    readonly VITE_APP_NAME?: string;
+    readonly VITE_APP_NAME: string;
     // outras variáveis VITE_*
   }
   interface ImportMeta {

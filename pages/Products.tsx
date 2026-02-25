@@ -23,6 +23,7 @@ import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { Search, Plus, Filter, Edit2, Grid2X2, List, Info, ChevronRight, ChevronUp, ChevronDown, Package, DollarSign, Tag, TrendingUp, X, Check, Image as ImageIcon, Archive, Cpu, Zap, ShieldAlert, UploadCloud, FileSpreadsheet, FileText, AlertCircle, RefreshCcw, Layers, Hash, Activity, FolderPlus, Trash2 } from 'lucide-react';
 import { Input, Button, Badge, Modal, Switch } from '../components/UI';
+import ColumnMappingModal from '../components/modals/ColumnMappingModal';
 import { Product, Category } from '../types';
 import { FeedbackPopup } from '@/components/FeedbackPopup';
 import { useAuth } from '../components/AuthContext';
@@ -30,6 +31,36 @@ import { isOperator } from '../types';
 import { logUiEvent } from '../services/telemetry';
 
 const ALLOWED_UNITS = ['cx', 'unit', 'kg', 'serv'] as const;
+type ImportField = 'internalCode' | 'gtin' | 'name' | 'costPrice' | 'salePrice' | 'stock' | 'supplier' | 'category' | 'type' | 'unit' | 'status';
+
+const REQUIRED_IMPORT_FIELDS: ImportField[] = ['name', 'salePrice'];
+const IMPORT_FIELDS: Array<{ key: ImportField; label: string; required: boolean }> = [
+   { key: 'internalCode', label: 'Codigo Interno', required: false },
+   { key: 'gtin', label: 'GTIN (EAN)', required: false },
+   { key: 'name', label: 'Nome', required: true },
+   { key: 'costPrice', label: 'Preco de Custo', required: false },
+   { key: 'salePrice', label: 'Preco de Venda', required: true },
+   { key: 'stock', label: 'Estoque', required: false },
+   { key: 'supplier', label: 'Fornecedor', required: false },
+   { key: 'category', label: 'Categoria', required: false },
+   { key: 'type', label: 'Tipo', required: false },
+   { key: 'unit', label: 'Unidade', required: false },
+   { key: 'status', label: 'Status', required: false },
+];
+
+const IMPORT_FIELD_ALIASES: Record<ImportField, string[]> = {
+   internalCode: ['internalcode', 'codigointerno', 'codigointerno', 'codigo', 'cod'],
+   gtin: ['gtin', 'ean', 'ean13', 'codigodebarras', 'codbarras', 'barcode'],
+   name: ['name', 'nome', 'descricao', 'desc', 'produto'],
+   costPrice: ['costprice', 'precocusto', 'custo', 'valorcusto'],
+   salePrice: ['saleprice', 'precovenda', 'venda', 'valorvenda', 'preco'],
+   stock: ['stock', 'estoque', 'quantidade', 'qtd', 'saldo'],
+   supplier: ['supplier', 'fornecedor', 'marca'],
+   category: ['category', 'categoria', 'grupo', 'departamento'],
+   type: ['type', 'tipo'],
+   unit: ['unit', 'unidade', 'und'],
+   status: ['status', 'situacao', 'ativo', 'estado'],
+};
 
 type ProductFormPayload = {
    name: string;
@@ -47,6 +78,85 @@ type ProductFormPayload = {
    type: 'product' | 'service';
    ean: string | null;
    internalCode: string | null;
+};
+
+const createEmptyColumnMapping = (): Record<ImportField, string> => ({
+   internalCode: '',
+   gtin: '',
+   name: '',
+   costPrice: '',
+   salePrice: '',
+   stock: '',
+   supplier: '',
+   category: '',
+   type: '',
+   unit: '',
+   status: '',
+});
+
+const normalizeImportHeader = (value: string) =>
+   String(value || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '');
+
+const suggestColumnMapping = (headers: string[]): Record<ImportField, string> => {
+   const suggestion = createEmptyColumnMapping();
+   const normalizedHeaders = headers.map(header => ({
+      original: header,
+      normalized: normalizeImportHeader(header),
+   }));
+
+   IMPORT_FIELDS.forEach(({ key }) => {
+      const aliases = IMPORT_FIELD_ALIASES[key];
+      const match = normalizedHeaders.find(({ normalized }) => aliases.includes(normalized));
+      if (match) suggestion[key] = match.original;
+   });
+
+   return suggestion;
+};
+
+const parseImportedNumber = (raw: unknown): number => {
+   if (typeof raw === 'number') return Number.isFinite(raw) ? raw : NaN;
+   const input = String(raw ?? '').trim();
+   if (!input) return NaN;
+   let normalized = input.replace(/\s+/g, '');
+   const comma = normalized.lastIndexOf(',');
+   const dot = normalized.lastIndexOf('.');
+   if (comma >= 0 && dot >= 0) {
+      if (comma > dot) {
+         normalized = normalized.replace(/\./g, '').replace(',', '.');
+      } else {
+         normalized = normalized.replace(/,/g, '');
+      }
+   } else if (comma >= 0) {
+      normalized = normalized.replace(',', '.');
+   }
+   return Number(normalized);
+};
+
+const parseImportType = (raw: unknown, unitRaw: unknown): 'product' | 'service' => {
+   const typeText = normalizeImportHeader(String(raw ?? ''));
+   const unitText = normalizeImportHeader(String(unitRaw ?? ''));
+   if (typeText.includes('serv')) return 'service';
+   if (unitText.startsWith('serv')) return 'service';
+   return 'product';
+};
+
+const parseImportUnit = (raw: unknown, type: 'product' | 'service'): 'cx' | 'unit' | 'kg' | 'serv' => {
+   const normalized = normalizeImportHeader(String(raw ?? ''));
+   if (type === 'service') return 'serv';
+   if (normalized === 'cx' || normalized === 'caixa') return 'cx';
+   if (normalized === 'kg' || normalized === 'quilo' || normalized === 'quilos') return 'kg';
+   if (normalized === 'serv') return 'serv';
+   return 'unit';
+};
+
+const parseImportStatus = (raw: unknown): 'active' | 'inactive' => {
+   const normalized = normalizeImportHeader(String(raw ?? ''));
+   if (normalized === 'inactive' || normalized === 'inativo') return 'inactive';
+   return 'active';
 };
 
 const mapApiProductToUi = (product: any): Product => ({
@@ -106,9 +216,13 @@ const Products: React.FC = () => {
    const [isSupplierLoading, setIsSupplierLoading] = useState(false);
    // Estados de Importação
    const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+   const [isColumnMappingModalOpen, setIsColumnMappingModalOpen] = useState(false);
    const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
    const [isUploading, setIsUploading] = useState(false);
    const [importResults, setImportResults] = useState<any[]>([]);
+   const [rawImportRows, setRawImportRows] = useState<any[]>([]);
+   const [importHeaders, setImportHeaders] = useState<string[]>([]);
+   const [columnMapping, setColumnMapping] = useState<Record<ImportField, string>>(createEmptyColumnMapping());
    // Estados de Filtro
    const [selectedCategory, setSelectedCategory] = useState<string>('all');
    const [stockStatus, setStockStatus] = useState<'all' | 'low' | 'normal'>('all');
@@ -229,6 +343,7 @@ const Products: React.FC = () => {
          if (e.key === 'Escape') {
             setIsCreateModalOpen(false);
             setIsImportModalOpen(false);
+            setIsColumnMappingModalOpen(false);
             setIsPreviewModalOpen(false);
          }
       }
@@ -504,6 +619,60 @@ const Products: React.FC = () => {
 
    // Simulação de Importação
 
+   const handleMappingChange = (field: string, column: string) => {
+      setColumnMapping(prev => ({ ...prev, [field]: column }));
+   };
+
+   function openColumnMappingForRows(data: any[]) {
+      if (!Array.isArray(data) || data.length === 0) {
+         setIsUploading(false);
+         showPopup('error', 'Arquivo vazio', 'Nenhum registro encontrado no arquivo importado.');
+         sendTelemetry('import', 'parse-empty');
+         return;
+      }
+
+      const headers = Array.from<string>(
+         data.reduce((set, row) => {
+            Object.keys(row || {}).forEach(key => set.add(String(key)));
+            return set;
+         }, new Set<string>())
+      );
+
+      if (headers.length === 0) {
+         setIsUploading(false);
+         showPopup('error', 'Arquivo invalido', 'Nao foi possivel identificar cabecalhos para mapeamento.');
+         sendTelemetry('import', 'parse-empty-headers');
+         return;
+      }
+
+      setRawImportRows(data);
+      setImportHeaders(headers);
+      setColumnMapping(suggestColumnMapping(headers));
+      setIsUploading(false);
+      setIsImportModalOpen(false);
+      setIsColumnMappingModalOpen(true);
+      sendTelemetry('modal', 'open', { entity: 'product-import-mapping', total: data.length, headers: headers.length });
+   }
+
+   const handleConfirmColumnMapping = () => {
+      const missingRequired = REQUIRED_IMPORT_FIELDS.filter(field => !columnMapping[field]);
+      if (missingRequired.length > 0) {
+         const missingLabels = IMPORT_FIELDS.filter(field => missingRequired.includes(field.key)).map(field => field.label).join(', ');
+         showPopup('error', 'Mapeamento incompleto', `Mapeie as colunas obrigatorias: ${missingLabels}.`);
+         return;
+      }
+
+      const selectedColumns = Object.values(columnMapping).filter(Boolean);
+      const hasDuplicates = new Set(selectedColumns).size !== selectedColumns.length;
+      if (hasDuplicates) {
+         showPopup('error', 'Mapeamento invalido', 'Cada campo deve usar uma coluna diferente.');
+         return;
+      }
+
+      setIsColumnMappingModalOpen(false);
+      processImportRows(rawImportRows, columnMapping);
+   };
+
    // Função para importar CSV ou XLSX
    const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
@@ -515,7 +684,7 @@ const Products: React.FC = () => {
          Papa.parse(file, {
             header: true,
             skipEmptyLines: true,
-            complete: (results: any) => processImportRows(results.data),
+            complete: (results: any) => openColumnMappingForRows(results.data),
             error: () => {
                setIsUploading(false);
                alert('Erro ao ler arquivo.');
@@ -529,7 +698,7 @@ const Products: React.FC = () => {
             const workbook = XLSX.read(data, { type: 'array' });
             const sheet = workbook.Sheets[workbook.SheetNames[0]];
             const json = XLSX.utils.sheet_to_json(sheet, { defval: '' });
-            processImportRows(json);
+            openColumnMappingForRows(json as any[]);
          };
          reader.onerror = () => {
             setIsUploading(false);
@@ -545,40 +714,75 @@ const Products: React.FC = () => {
    };
 
    // Função para processar linhas importadas
-   function processImportRows(data: any[]) {
+   function processImportRows(data: any[], mapping: Record<ImportField, string>) {
       // Esperado: internalCode, gtin, name, costPrice, salePrice, stock, [supplier], [category]
       const rows = data.map((row: any, idx: number) => {
          const errors = [];
+         const getFieldValue = (field: ImportField) => {
+            const mappedColumn = mapping[field];
+            return mappedColumn ? row?.[mappedColumn] : '';
+         };
          // Sempre tratar códigos como string
-         const internalCode = String(row.internalCode ?? '').trim();
-         const gtin = String(row.gtin ?? '').trim();
-         if (!internalCode) errors.push('Código interno obrigatório');
-         if (!gtin) errors.push('EAN obrigatório');
-         if (!row.name) errors.push('Descrição obrigatória');
-         if (!row.costPrice) errors.push('Preço de custo obrigatório');
-         if (!row.salePrice) errors.push('Preço de venda obrigatório');
-         if (!row.stock) errors.push('Quantidade obrigatória');
+         const internalCode = String(getFieldValue('internalCode') ?? '').trim();
+         const gtin = String(getFieldValue('gtin') ?? '').trim();
+         const name = String(getFieldValue('name') ?? '').trim();
+         const costRaw = getFieldValue('costPrice');
+         const saleRaw = getFieldValue('salePrice');
+         const stockRaw = getFieldValue('stock');
+         const supplier = String(getFieldValue('supplier') ?? '').trim();
+         const category = String(getFieldValue('category') ?? '').trim();
+         const rawType = getFieldValue('type');
+         const rawUnit = getFieldValue('unit');
+         const rawStatus = getFieldValue('status');
+         let itemType = parseImportType(rawType, rawUnit);
+         const itemStatus = parseImportStatus(rawStatus);
+         const hasTypeValue = String(rawType ?? '').trim() !== '';
+         const hasUnitValue = String(rawUnit ?? '').trim() !== '';
+         const hasGtinValue = gtin.length > 0;
+         const hasInternalCodeValue = internalCode.length > 0;
+         const shouldInferService = !hasTypeValue && !hasUnitValue && !hasGtinValue && !hasInternalCodeValue;
+         if (itemType === 'product' && shouldInferService) {
+            itemType = 'service';
+         }
+         const isService = itemType === 'service';
+         const itemUnit = parseImportUnit(rawUnit, itemType);
+
+         const hasCost = String(costRaw ?? '').trim() !== '';
+         const hasSale = String(saleRaw ?? '').trim() !== '';
+         const hasStock = String(stockRaw ?? '').trim() !== '';
+         const costPrice = parseImportedNumber(costRaw);
+         const salePrice = parseImportedNumber(saleRaw);
+         const stockValue = parseImportedNumber(stockRaw);
+
+         if (!isService && !internalCode) errors.push('Código interno obrigatório');
+         if (!isService && !gtin) errors.push('EAN obrigatório');
+         if (!name) errors.push('Descrição obrigatória');
+         if (!hasSale) errors.push('Preço de venda obrigatório');
+         if (!isService && !hasCost) errors.push('Preço de custo obrigatório');
+         if (!isService && !hasStock) errors.push('Quantidade obrigatória');
+         if (!isService && hasCost && Number.isNaN(costPrice)) errors.push('Preço de custo inválido');
+         if (hasSale && Number.isNaN(salePrice)) errors.push('Preço de venda inválido');
+         if (!isService && hasStock && Number.isNaN(stockValue)) errors.push('Quantidade inválida');
 
          // Verifica duplicidade no banco atual
-         const eanExists = products.some(p => p.gtin === gtin);
-         const codeExists = products.some(p => p.internalCode === internalCode);
-         if (eanExists) errors.push('EAN já existe');
-         if (codeExists) errors.push('Código interno já existe');
-
-         // Garante que costPrice/salePrice sejam números válidos (reais)
-         const costPrice = Number(row.costPrice);
-         const salePrice = Number(row.salePrice);
+         const eanExists = !!gtin && products.some(p => p.gtin === gtin);
+         const codeExists = !!internalCode && products.some(p => p.internalCode === internalCode);
+         if (!isService && eanExists) errors.push('EAN já existe');
+         if (!isService && codeExists) errors.push('Código interno já existe');
 
          return {
             id: `import-${idx}`,
             internalCode,
             gtin,
-            name: row.name,
-            costPrice: isNaN(costPrice) ? 0 : costPrice,
-            salePrice: isNaN(salePrice) ? 0 : salePrice,
-            stock: parseInt(row.stock),
-            supplier: row.supplier || '',
-            category: row.category || '',
+            name,
+            costPrice: Number.isNaN(costPrice) ? 0 : costPrice,
+            salePrice: Number.isNaN(salePrice) ? 0 : salePrice,
+            stock: isService ? 0 : (Number.isNaN(stockValue) ? 0 : Math.max(0, Math.trunc(stockValue))),
+            supplier,
+            category,
+            type: itemType,
+            unit: itemUnit,
+            statusValue: itemStatus,
             status: errors.length ? 'error' : 'valid',
             message: errors.join(', ')
          };
@@ -590,7 +794,7 @@ const Products: React.FC = () => {
       const valid = rows.filter(r => r.status === 'valid').length;
       const invalid = rows.length - valid;
       sendTelemetry('modal', 'open', { entity: 'product-import-preview', total: rows.length });
-      sendTelemetry('import', 'parse', { rows: rows.length, valid, invalid });
+      sendTelemetry('import', 'parse', { rows: rows.length, valid, invalid, mappedColumns: Object.values(mapping).filter(Boolean).length });
    }
 
    const handleDrop = (e: React.DragEvent) => {
@@ -1603,7 +1807,7 @@ const Products: React.FC = () => {
                               // Filtra apenas produtos válidos e não duplicados
                               const validProducts = importResults.filter((item: any) => item.status === 'valid');
                               if (validProducts.length === 0) {
-                                 showPopup('error', 'Importação inválida', 'Nenhum produto válido para importar.');
+                                 showPopup('error', 'Importação inválida', 'Nenhum item válido para importar.');
                                  sendTelemetry('import', 'preview-empty');
                                  setIsUploading(false);
                                  return;
@@ -1713,22 +1917,24 @@ const Products: React.FC = () => {
                                     if (sid) supplierId = sid;
                                  }
 
-                                 const payload = {
-                                    name: item.name,
-                                    ean: item.gtin,
-                                    internalCode: item.internalCode,
-                                    unit: 'unit',
-                                    status: 'active',
-                                    costPrice: item.costPrice,
-                                    salePrice: item.salePrice,
-                                    stockOnHand: item.stock,
-                                    minStock: 0,
-                                    autoDiscountEnabled: false,
-                                    autoDiscountValue: 0,
-                                    imageUrl: '',
-                                    categoryId,
-                                    supplierId,
-                                 };
+                                  const isService = item.type === 'service';
+                                  const payload = {
+                                     name: item.name,
+                                     ean: isService ? null : item.gtin,
+                                     internalCode: isService ? null : item.internalCode,
+                                     unit: item.unit || (isService ? 'serv' : 'unit'),
+                                     status: item.statusValue || 'active',
+                                     costPrice: item.costPrice,
+                                     salePrice: item.salePrice,
+                                     stockOnHand: isService ? 0 : item.stock,
+                                     minStock: 0,
+                                     autoDiscountEnabled: false,
+                                     autoDiscountValue: 0,
+                                     imageUrl: '',
+                                     categoryId,
+                                     supplierId: isService ? null : supplierId,
+                                     type: isService ? 'service' : 'product',
+                                  };
                                  try {
                                     const res = await fetch('/api/products', {
                                        method: 'POST',
@@ -1739,7 +1945,7 @@ const Products: React.FC = () => {
                                  } catch { }
                               }
                               sendTelemetry('import', 'run', { importedCount, total: validProducts.length });
-                              showPopup('success', 'Importação concluída!', `${importedCount} produtos importados com sucesso!`);
+                              showPopup('success', 'Importação concluída!', `${importedCount} itens importados com sucesso!`);
                               setIsPreviewModalOpen(false);
                               // Atualiza lista de produtos
                               setLoading(true);
@@ -1767,6 +1973,16 @@ const Products: React.FC = () => {
                </div>
             </div>
          )}
+
+         <ColumnMappingModal
+            isOpen={isColumnMappingModalOpen}
+            onClose={() => setIsColumnMappingModalOpen(false)}
+            onConfirm={handleConfirmColumnMapping}
+            headers={importHeaders}
+            fields={IMPORT_FIELDS}
+            mapping={columnMapping}
+            onMappingChange={handleMappingChange}
+         />
 
 
          <FeedbackPopup
