@@ -37,6 +37,15 @@ if %errorlevel% neq 0 (
 )
 call powershell -Command "Write-Host 'Dependencias instaladas com sucesso.' -ForegroundColor Green"
 
+echo [4/5] Aplicando migrations do banco de dados...
+call npm run migrate >migrate.log 2>&1
+if %errorlevel% neq 0 (
+  call powershell -Command "Write-Host 'Falha ao aplicar migrations. Veja migrate.log para detalhes.' -ForegroundColor Red"
+  pause
+  exit /b 1
+)
+call powershell -Command "Write-Host 'Migrations aplicadas com sucesso.' -ForegroundColor Green"
+
 echo [4/5] Iniciando backend em modo producao (PM2)...
 call pm2 delete PDVsystem >nul 2>&1
 call pm2 start server/dist/index.js --name PDVsystem --env production --node-args="--env-file=.env" >start.log 2>&1

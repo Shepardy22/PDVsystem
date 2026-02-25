@@ -1,0 +1,1 @@
+-- NO-OP: schema final de products já consolidado na 0021.

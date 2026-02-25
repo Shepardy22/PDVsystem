@@ -58,6 +58,7 @@ goto afterpublic
 echo Copiando manifestos e scripts...
 copy /y "package.json" "%STAGEDIR%" >nul
 copy /y "package-lock.json" "%STAGEDIR%" >nul
+REM Não copia node_modules para o pacote, será instalado no destino
 copy /y ".env" "%STAGEDIR%" >nul
 copy /y "README.md" "%STAGEDIR%" >nul
 copy /y "instalar-app.bat" "%STAGEDIR%" >nul
