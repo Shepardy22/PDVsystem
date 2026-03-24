@@ -19,7 +19,7 @@ export interface ReceiptPDFOptions {
 export async function generateReceiptPDF({ company, sale }: ReceiptPDFOptions) {
   // Busca dados do .env (Vite)
   const envCompany = {
-    name: import.meta.env.VITE_APP_NAME || company.name || 'Chaveiro Mega Chave',
+    name: import.meta.env.VITE_APP_NAME || company.name || 'MV Chaveiro',
     cnpj: import.meta.env.VITE_APP_CNPJ || company.cnpj || '',
     address: import.meta.env.VITE_APP_ADDRESS || company.address || '',
     phone: import.meta.env.VITE_APP_PHONE || company.phone || '',

@@ -276,31 +276,18 @@ const App: React.FC = () => {
         {/* Botão para recolher/expandir sidebar (removido, logo permanece) */}
         <div className={`p-8 flex flex-col items-center ${isSidebarOpen ? 'gap-4' : 'gap-2'} ${isSidebarOpen ? 'items-center' : 'items-center justify-center'}`}>
           
-          <div className="w-10 h-10 rounded-xl  flex items-center justify-center overflow-hidden">
+          <div className="w-24 h-24 rounded-2xl flex items-center justify-center overflow-hidden shadow-lg bg-white/5">
             <img
               src="/uploads/logo.png"
               alt="Logo"
-              className="object-cover w-full h-full"
+              className="object-contain w-full h-full"
               draggable={false}
             />
           </div>
 
 
 
-          {isSidebarOpen && (
-            <div
-              className={`flex flex-col items-center justify-center transition-all duration-200 ${
-                !showCompanyName ? 'opacity-0 w-0 overflow-hidden' : ''
-              }`}
-            >
-              <span className="text-lg font-bold tracking-tight text-white leading-tight">
-                {(import.meta.env.VITE_APP_NAME || 'Chaveiro Mega Chave').split(' ')[0]}
-              </span>
-              <span className="text-xl font-bold tracking-tight text-accent opacity-80 leading-tight">
-                {(import.meta.env.VITE_APP_NAME || 'Chaveiro Mega Chave').split(' ').slice(1).join(' ')}
-              </span>
-            </div>
-          )}
+          
 
 
         </div>

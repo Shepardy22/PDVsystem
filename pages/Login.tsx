@@ -49,7 +49,7 @@ const Login: React.FC<LoginProps> = ({ onOpenCash }) => {
               style={{ maxWidth: '100%', maxHeight: '100%' }}
             />
           </div>
-          <h1 className="text-3xl font-bold tracking-tight text-white">{import.meta.env.VITE_APP_NAME || 'Chaveiro Mega Chave'} </h1>
+          <h1 className="text-3xl font-bold tracking-tight text-white">{import.meta.env.VITE_APP_NAME || 'MV Chaveiro'} </h1>
           <p className="text-slate-400 mt-2">Login de Acesso</p>
         </div>
 

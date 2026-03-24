@@ -14,7 +14,7 @@ export interface ReceiptModalProps {
 const ReceiptModal: React.FC<ReceiptModalProps> = ({ isOpen, lastSaleData, onClose, onPrint }) => {
   // Dados fictícios da empresa (pode ser ajustado para vir do backend/config)
   const company = {
-    name: import.meta.env.VITE_APP_NAME || 'Chaveiro Mega Chave',
+    name: import.meta.env.VITE_APP_NAME || 'MV Chaveiro',
     cnpj: import.meta.env.VITE_APP_CNPJ || '00.000.000/0000-00',
     address: import.meta.env.VITE_APP_ADDRESS || 'Endereço Exemplo, 123',
     phone: import.meta.env.VITE_APP_PHONE || '(00) 0000-0000',
